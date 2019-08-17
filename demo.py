@@ -1,3 +1,8 @@
+import logging
+import os
+
+LOGGER = logging.getLogger(__name__)
+
 WORKSPACE_SPEC = {
     "type": "directory",
     "required": True,
@@ -83,6 +88,89 @@ MODEL_SPEC = {
         }
     }
 }
+
+def validate_file(filepath, permissions):
+    if not os.path.exists(filepath):
+        return "File not found"
+
+    for letter, mode, descriptor in (
+            ('r', os.R_OK, 'read'),
+            ('w', os.W_OK, 'write'),
+            ('x', os.X_OK, 'execute')):
+        if letter in permissions and not os.access(filepath, mode):
+            return 'You must have %s access to this file' % descriptor
+
+def validate_raster(filepath):
+    file_warning = validate_file(filepath, 'r')
+    gdal_dataset = gdal.OpenEx(filepath, gdal.OF_RASTER)
+    if gdal_dataset is None:
+        return "File could not be opened as a GDAL raster"
+    else:
+        gdal_dataset = None
+    return None
+
+def validate_vector(filepath, required_fields, layer_geometry_type, projected,
+                    projected_units):
+    pass
+
+
+
+VALIDATION_FUNCS = {
+    'csv': validate_csv,
+    'raster': validate_raster,
+    'vector': validate_vector,
+    'file': validate_file,
+}
+
+def _do_the_validation(args, spec):
+    validation_warnings = []
+
+    # step 1: check absolute requirement
+    missing_keys = set()
+    keys_with_no_value = set()
+    for key, parameter_spec in spec.items():
+        if parameter_spec['required'] is True:
+            if key not in args:
+                missing_keys.add(key)
+            else:
+                if args[key] in ('', None):
+                    keys_with_no_value.add(key)
+
+    if missing_keys:
+        validation_warnings.append(
+            (sorted(missing_keys), "Key is missing from the args dict"))
+
+    if keys_with_no_value:
+        validation_warnings.append(
+            (sorted(keys_with_no_value), "Key is required but has no value"))
+
+    invalid_keys = missing_keys + keys_with_no_value
+
+    # step 2: check primitive validity
+    for key, parameter_spec in spec.items():
+        if key in invalid_keys:
+            continue  # no need to validate a key we know is missing.
+
+        type_validation_func = VALIDATION_FUNCS[parameter_spec['type']]
+        try:
+            warning_msg = type_validation_func(
+                args[key], **parameter_spec['validation_options'])
+
+            if warning_msg:
+                validation_warnings.append(([key], warning_msg))
+                invalid_keys.add(key)
+        except Exception as error:
+            LOGGER.exception('Error when validating key %s with value %s')
+            validation_warnings.append(
+                ([key], 'An unexpected error occurred in validation'))
+
+
+
+    # step 3: check conditional requirement
+
+
+
+
 
 def validate(args):
     return []
