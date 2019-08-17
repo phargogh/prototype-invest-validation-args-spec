@@ -1,6 +1,8 @@
 import logging
 import os
 
+import sympy
+
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_SPEC = {
@@ -16,8 +18,10 @@ SUFFIX_SPEC = {
     "type": "freestyle_string",
     "required": False,
     "validation_options": {
-        "pattern": "[a-zA-Z0-9_-]*",
-        "case_sensitive": False,
+        "regexp": {
+            "pattern": "[a-zA-Z0-9_-]*",
+            "case_sensitive": False,
+        }
     }
 }
 
@@ -89,30 +93,125 @@ MODEL_SPEC = {
     }
 }
 
-def validate_file(filepath, permissions):
+def validate_directory(dirpath, exists=False, permissions='rx'):
+    if exists:
+        if not os.path.exists(dirpath):
+            return "Directory not found"
+
+    if not os.path.isdir(dirpath):
+        return "Path is not a directory"
+
+    permissions_warning = validate_permissions(dirpath, permissions)
+    if permissions_warning:
+        return permissions_warning
+
+
+def validate_file(filepath, permissions='r'):
     if not os.path.exists(filepath):
         return "File not found"
 
+    permissions_warning = validate_permissions(filepath, permissions)
+    if permissions_warning:
+        return permissions_warning
+
+def validate_permissions(path, permissions)
     for letter, mode, descriptor in (
             ('r', os.R_OK, 'read'),
             ('w', os.W_OK, 'write'),
             ('x', os.X_OK, 'execute')):
-        if letter in permissions and not os.access(filepath, mode):
+        if letter in permissions and not os.access(path, mode):
             return 'You must have %s access to this file' % descriptor
 
+def validate_before(func):
+    def decorator(*pre_validation_funcs):
+        def wrapped_validator(*validation_args, **validation_kwargs):
+            for pre_validator, validator_kwargs in pre_validation_funcs:
+                warning_string = pre_validation_func(
+                    *validation_args, **validator_kwargs)
+                if warning_string:
+                    return warning_string
+
+            return func(*validation_args, **validation_kwargs)
+
+
+@validate_before((validate_file, {'permissions': 'r'}))
 def validate_raster(filepath):
-    file_warning = validate_file(filepath, 'r')
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
     gdal_dataset = gdal.OpenEx(filepath, gdal.OF_RASTER)
+    gdal.PopErrorHandler()
+
     if gdal_dataset is None:
         return "File could not be opened as a GDAL raster"
     else:
         gdal_dataset = None
     return None
 
-def validate_vector(filepath, required_fields, layer_geometry_type, projected,
-                    projected_units):
-    pass
+@validate_before((validate_file, {'permissions': 'r'}))
+def validate_vector(filepath, required_fields=None, layer_geometry_type=None,
+                    projected=None, projected_units=None):
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+    gdal_dataset = gdal.OpenEx(filepath, gdal.OF_VECTOR)
+    gdal.PopErrorHandler()
 
+    if gdal_dataset is None:
+        return "File could not be opened as a GDAL vector"
+
+    layer = gdal_dataset.GetLayer()
+    fieldnames = set([defn.GetName().upper() for defn in layer.schema])
+    missing_fields = fieldnames - set(field.upper() for field in required_fields)
+    if missing_fields:
+        return "Fields are missing from the first layer: %s" % sorted(
+            missing_fields)
+
+
+    return None
+
+def validate_regexp(value, regexp):
+    flags = 0
+    if 'case_sensitive' in regexp:
+        if regexp['case_sensitive']:
+            flags = re.IGNORECASE
+    matches = re.findall(regexp['pattern'], str(value), flags)
+    if not matches:
+        return "Value did not match expected pattern %s", regexp['pattern']
+
+
+
+def validate_freestyle_string(value, regexp=None):
+    try:
+        str(value):
+    except (ValueError, TypeError):
+        return "Could not convert value to a string"
+
+    if regexp:
+        regexp_warning = validate_regexp(regexp, value)
+        if regexp_warning:
+            return regexp_warning
+
+    return None
+
+
+def validate_option_string(value, options):
+    if value not in options:
+        return "Value must be one of: %s" % sorted(options)
+
+
+def validate_number(value, regexp=None, expression=None):
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return "Value could not be interpreted as a number"
+
+    if regexp:
+        regexp_warning = validate_regexp(regexp, value)
+        if regexp_warning:
+            return regexp_warning
+
+    if expression:
+        # Evaluate a sympy expression.
+        pass
+
+    return None
 
 
 VALIDATION_FUNCS = {
@@ -120,6 +219,7 @@ VALIDATION_FUNCS = {
     'raster': validate_raster,
     'vector': validate_vector,
     'file': validate_file,
+    'number': validate_number,
 }
 
 def _do_the_validation(args, spec):
