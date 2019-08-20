@@ -201,18 +201,6 @@ def validate_vector(filepath, required_fields=None, projected=False,
     return None
 
 
-def validate_regexp(value, regexp):
-    flags = 0
-    if 'case_sensitive' in regexp:
-        if regexp['case_sensitive']:
-            flags = re.IGNORECASE
-    matches = re.findall(regexp['pattern'], str(value), flags)
-    if not matches:
-        return "Value did not match expected pattern %s", regexp['pattern']
-
-    return None
-
-
 def validate_freestyle_string(value, regexp=None):
     try:
         str(value):
@@ -220,9 +208,13 @@ def validate_freestyle_string(value, regexp=None):
         return "Could not convert value to a string"
 
     if regexp:
-        regexp_warning = validate_regexp(regexp, value)
-        if regexp_warning:
-            return regexp_warning
+        flags = 0
+        if 'case_sensitive' in regexp:
+            if regexp['case_sensitive']:
+                flags = re.IGNORECASE
+        matches = re.findall(regexp['pattern'], str(value), flags)
+        if not matches:
+            return "Value did not match expected pattern %s", regexp['pattern']
 
     return None
 
@@ -237,11 +229,6 @@ def validate_number(value, regexp=None, expression=None):
         float(value)
     except (TypeError, ValueError):
         return "Value could not be interpreted as a number"
-
-    if regexp:
-        regexp_warning = validate_regexp(regexp, value)
-        if regexp_warning:
-            return regexp_warning
 
     if expression:
         # Evaluate a sympy expression.
