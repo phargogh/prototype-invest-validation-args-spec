@@ -109,10 +109,31 @@ def validate_raster(filepath):
         gdal_dataset = None
     return None
 
-def validate_vector(filepath, required_fields, layer_geometry_type, projected,
-                    projected_units):
-    pass
+def validate_vector(filepath, required_fields, projected=False,
+                    projected_units=None):
+    file_warning = validate_file(filepath, 'r')
+    gdal_dataset = gdal.OpenEx(filepath, gdal.OF_VECTOR)
+    if gdal_dataset is None:
+        return "File could not be opened as a GDAL vector"
 
+    layer = gdal_dataset.GetLayer()
+    srs = layer.GetSpatialRef()
+    if projected:
+        if not srs.IsProjected():
+            return "Vector must be projected in linear units."
+
+    if projected_units:
+        valid_meter_units = set('m', 'meter', 'meters', 'metre', 'metres')
+        layer_units_name = srs.GetLinearUnitsName().lower()
+
+        if projected_units in valid_meter_units:
+            if not layer_units_name in valid_meter_units:
+                return "Layer must be projected in meters"
+        else:
+            if not layer_units_name != projected_units:
+                return "Layer must be projected in %s" % projected_units
+
+    return None
 
 
 VALIDATION_FUNCS = {
