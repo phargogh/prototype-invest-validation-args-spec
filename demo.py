@@ -237,6 +237,20 @@ def validate_number(value, regexp=None, expression=None):
     return None
 
 
+def validate_boolean(value):
+    value = value.strip()
+    if isinstance(str, value):
+        if value.lower() not in ("true", "false"):
+            return "Value must be one of 'True' or 'False'"
+
+    else:
+        try:
+            bool(value)
+        except (ValueError, TypeError):
+            return "Value could not be cast to a boolean."
+
+
+
 VALIDATION_FUNCS = {
     'csv': validate_csv,
     'raster': validate_raster,
