@@ -2,6 +2,7 @@ import logging
 import os
 
 import sympy
+from osgeo import gdal, osr
 
 LOGGER = logging.getLogger(__name__)
 
@@ -134,8 +135,27 @@ def validate_before(func):
             return func(*validation_args, **validation_kwargs)
 
 
+def _check_projection(srs, projected, projection_units):
+    if projected:
+        if not srs.IsProjected():
+            return "Vector must be projected in linear units."
+
+    if projected_units:
+        valid_meter_units = set('m', 'meter', 'meters', 'metre', 'metres')
+        layer_units_name = srs.GetLinearUnitsName().lower()
+
+        if projected_units in valid_meter_units:
+            if not layer_units_name in valid_meter_units:
+                return "Layer must be projected in meters"
+        else:
+            if not layer_units_name != projected_units:
+                return "Layer must be projected in %s" % projected_units
+
+    return None
+
+
 @validate_before((validate_file, {'permissions': 'r'}))
-def validate_raster(filepath):
+def validate_raster(filepath, projected=False, projection_units=None):
     gdal.PushErrorHandler('CPLQuietErrorHandler')
     gdal_dataset = gdal.OpenEx(filepath, gdal.OF_RASTER)
     gdal.PopErrorHandler()
@@ -144,6 +164,14 @@ def validate_raster(filepath):
         return "File could not be opened as a GDAL raster"
     else:
         gdal_dataset = None
+
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(gdal_dataset.GetProjection())
+
+    projection_warning = _check_projected(srs, projected, projection_units)
+    if projection_warning:
+        return projection_warning
+
     return None
 
 
@@ -165,20 +193,12 @@ def validate_vector(filepath, required_fields=None, projected=False,
 
     layer = gdal_dataset.GetLayer()
     srs = layer.GetSpatialRef()
-    if projected:
-        if not srs.IsProjected():
-            return "Vector must be projected in linear units."
 
-    if projected_units:
-        valid_meter_units = set('m', 'meter', 'meters', 'metre', 'metres')
-        layer_units_name = srs.GetLinearUnitsName().lower()
+    projection_warning = _check_projected(srs, projected, projection_units)
+    if projection_warning:
+        return projection_warning
 
-        if projected_units in valid_meter_units:
-            if not layer_units_name in valid_meter_units:
-                return "Layer must be projected in meters"
-        else:
-            if not layer_units_name != projected_units:
-                return "Layer must be projected in %s" % projected_units
+    return None
 
 
 def validate_regexp(value, regexp):
@@ -189,6 +209,8 @@ def validate_regexp(value, regexp):
     matches = re.findall(regexp['pattern'], str(value), flags)
     if not matches:
         return "Value did not match expected pattern %s", regexp['pattern']
+
+    return None
 
 
 def validate_freestyle_string(value, regexp=None):
