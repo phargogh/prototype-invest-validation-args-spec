@@ -2,6 +2,7 @@ import logging
 import os
 
 import sympy
+import sympy.parsing.sympy_parser
 from osgeo import gdal, osr
 
 LOGGER = logging.getLogger(__name__)
@@ -231,8 +232,16 @@ def validate_number(value, regexp=None, expression=None):
         return "Value could not be interpreted as a number"
 
     if expression:
-        # Evaluate a sympy expression.
-        pass
+        # Check to make sure that 'value' is in the expression.
+        if 'value' not in sympy.parsing.sympy_parser.parse_expr(
+                expression).free_symbols:
+            raise AssertionError('Value is not used in this expression')
+
+        # Expression is assumed to return a boolean, something like
+        # "value > 0" or "(value >= 0) & (value < 1)".  An exception will
+        # be raised if sympy can't evaluate the expression.
+        if not sympy.lambdify(['value'], expression, 'numpy')(value):
+            return "Value does not meet condition %s" % expression
 
     return None
 
@@ -248,6 +257,8 @@ def validate_boolean(value):
             bool(value)
         except (ValueError, TypeError):
             return "Value could not be cast to a boolean."
+
+    return None
 
 
 
