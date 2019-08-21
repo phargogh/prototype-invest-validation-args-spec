@@ -1,4 +1,4 @@
-import logging
+mport logging
 import os
 
 import sympy
@@ -263,12 +263,17 @@ def validate_boolean(value):
 
 
 VALIDATION_FUNCS = {
+    'file': validate_file,
+    'folder': validate_directory,
     'csv': validate_csv,
     'raster': validate_raster,
     'vector': validate_vector,
-    'file': validate_file,
     'number': validate_number,
+    'boolean': validate_boolean,
+    'freestyle_string': validate_freestyle_string,
+    'option_string': validate_option_string,
 }
+
 
 def _do_the_validation(args, spec):
     validation_warnings = []
@@ -276,6 +281,7 @@ def _do_the_validation(args, spec):
     # step 1: check absolute requirement
     missing_keys = set()
     keys_with_no_value = set()
+    conditionally_required_keys = set()
     for key, parameter_spec in spec.items():
         if parameter_spec['required'] is True:
             if key not in args:
@@ -283,6 +289,8 @@ def _do_the_validation(args, spec):
             else:
                 if args[key] in ('', None):
                     keys_with_no_value.add(key)
+        elif isinstance(parameter_spec['required'], str):
+            conditionally_required_keys.add(key)
 
     if missing_keys:
         validation_warnings.append(
@@ -312,12 +320,23 @@ def _do_the_validation(args, spec):
             validation_warnings.append(
                 ([key], 'An unexpected error occurred in validation'))
 
-
-
     # step 3: check conditional requirement
+    for key in conditionally_required_keys:
+        if key in invalid_keys:
+            continue  # no need to check requirement on already invalid input
 
-
-
+        # An input is conditionally required when any of the upstream keys have
+        # a value and are valid.
+        for upstream_key in spec[key]['required']:
+            if upstream_key not in invalid_keys:
+                # It's required!
+                if key not in args:
+                    validation_warnings.append(
+                        ([key], "Key is missing from the args dict"))
+                else:
+                    if args[key] in ('', None):
+                        validation_warnings.append(
+                            ([key], "Key is required but has no value"))
 
 
 def validate(args):
